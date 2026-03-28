@@ -549,7 +549,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 
 	for (unsigned int i = 0; i < hidden.size(); ++i) {
 		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i], hiddenGUIDs[i])) {
-			enumLog("\"%s\" %s -> hidden", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLog("hidden:   \"%s\" %s", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -568,7 +568,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 		}
 
 		if (!isVisible) {
-			enumLog("\"%s\" %s -> not in visible list", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLog("hidden:   \"%s\" %s (not in visible list)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -580,12 +580,12 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 
 		// Important that we prioritize a match via device instance ID or GUID over a match via name
 		if (match == kDeviceInstanceIDMatch) {
-			enumLog("\"%s\" %s -> sorted (device instance ID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLog("sorted:   \"%s\" %s (device instance ID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
 		} else if (match == kGUIDMatch) {
-			enumLog("\"%s\" %s -> sorted (GUID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLog("sorted:   \"%s\" %s (GUID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
@@ -595,12 +595,12 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 	}
 
 	if (nameMatchIndex != -1) {
-		enumLog("\"%s\" %s -> sorted (name)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+		enumLog("sorted:   \"%s\" %s (name)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 		enumData->sorted[nameMatchIndex].push_back(*deviceInstance);
 		return DIENUM_CONTINUE;
 	}
 
-	enumLog("\"%s\" %s -> unsorted", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+	enumLog("unsorted: \"%s\" %s", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 	enumData->nonsorted.push_back(*deviceInstance);
 	return DIENUM_CONTINUE;
 }
@@ -619,7 +619,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 
 	for (unsigned int i = 0; i < hidden.size(); ++i) {
 		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i], hiddenGUIDs[i])) {
-			enumLogW(L"\"%s\" %S -> hidden", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLogW(L"hidden:   \"%s\" %S", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -638,7 +638,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 		}
 
 		if (!isVisible) {
-			enumLogW(L"\"%s\" %S -> not in visible list", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLogW(L"hidden:   \"%s\" %S (not in visible list)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -650,12 +650,12 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 
 		// Important that we prioritize a match via device instance ID or GUID over a match via name
 		if (match == kDeviceInstanceIDMatch) {
-			enumLogW(L"\"%s\" %S -> sorted (device instance ID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLogW(L"sorted:   \"%s\" %S (device instance ID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
 		} else if (match == kGUIDMatch) {
-			enumLogW(L"\"%s\" %S -> sorted (GUID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+			enumLogW(L"sorted:   \"%s\" %S (GUID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
@@ -665,12 +665,12 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 	}
 
 	if (nameMatchIndex != -1) {
-		enumLogW(L"\"%s\" %S -> sorted (name)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+		enumLogW(L"sorted:   \"%s\" %S (name)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 		enumData->sorted[nameMatchIndex].push_back(*deviceInstance);
 		return DIENUM_CONTINUE;
 	}
 
-	enumLogW(L"\"%s\" %S -> unsorted", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
+	enumLogW(L"unsorted: \"%s\" %S", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 	enumData->nonsorted.push_back(*deviceInstance);
 	return DIENUM_CONTINUE;
 }
