@@ -34,12 +34,11 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 	LPVOID lpReserved
 	)
 {
-	LogSystem();
-	MH_Initialize();
-
 	switch (ul_reason_for_call)
 	{
 		case DLL_PROCESS_ATTACH:
+			LogSystem();
+			MH_Initialize();
 			DisableThreadLibraryCalls(hModule);
 			atexit(ExitInstance);
 			break;

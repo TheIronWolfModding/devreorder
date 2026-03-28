@@ -35,27 +35,44 @@ struct EnumCallbackUserData {
 	void* enumData;
 };
 
+// Forward declarations for string utilities
+string trim(const string &str);
+wstring trim(const wstring &str);
+string toLower(const string &str);
+wstring toLower(const wstring &str);
+
+static CSimpleIniW& getCachedIni()
+{
+	static CSimpleIniW ini;
+	static bool loaded = false;
+
+	if (!loaded) {
+		loaded = true;
+		ini.SetAllowEmptyValues(true);
+		wstring inipath(L"devreorder.ini");
+		SI_Error err = ini.LoadFile(inipath.c_str());
+
+		if (err < 0) {
+			CheckCommonDirectory(&inipath, L"devreorder");
+			err = ini.LoadFile(inipath.c_str());
+
+			if (err < 0) {
+				PrintLog("devreorder error: devreorder.ini file found");
+			} else {
+				PrintLog("devreorder: using system-wide devreorder.ini");
+			}
+		} else {
+			PrintLog("devreorder: using program-specific devreorder.ini");
+		}
+	}
+
+	return ini;
+}
+
 vector<wstring> loadAllKeysFromSectionOfIni(const wstring &section)
 {
 	vector<wstring> result;
-	CSimpleIniW ini;
-	ini.SetAllowEmptyValues(true);
-	wstring inipath(L"devreorder.ini");
-	SI_Error err = ini.LoadFile(inipath.c_str());
-
-	if (err < 0) {
-		CheckCommonDirectory(&inipath, L"devreorder");
-		err = ini.LoadFile(inipath.c_str());
-
-		if (err < 0) {
-			PrintLog("devreorder error: devreorder.ini file found");
-			return result;
-		} else {
-			PrintLog("devreorder: using system-wide devreorder.ini");
-		}
-	} else {
-		PrintLog("devreorder: using program-specific devreorder.ini");
-	}
+	CSimpleIniW &ini = getCachedIni();
 
 	CSimpleIniW::TNamesDepend keys;
 	ini.GetAllKeys(section.c_str(), keys);
@@ -76,6 +93,12 @@ vector<wstring> & sortedControllersW()
 	if (needToInitialize) {
 		needToInitialize = false;
 		result = loadAllKeysFromSectionOfIni(L"order");
+		for (auto &entry : result) {
+			entry = trim(entry);
+			if (entry.length() > 0 && (entry[0] == L'{' || entry[0] == L'<')) {
+				entry = toLower(entry);
+			}
+		}
 	}
 
 	return result;
@@ -106,6 +129,12 @@ vector<wstring> & hiddenControllersW()
 
 	if (needToInitialize) {
 		result = loadAllKeysFromSectionOfIni(L"hidden");
+		for (auto &entry : result) {
+			entry = trim(entry);
+			if (entry.length() > 0 && (entry[0] == L'{' || entry[0] == L'<')) {
+				entry = toLower(entry);
+			}
+		}
 		needToInitialize = false;
 	}
 
@@ -137,6 +166,12 @@ vector<wstring> & visibleControllersW()
 
 	if (needToInitialize) {
 		result = loadAllKeysFromSectionOfIni(L"visible");
+		for (auto &entry : result) {
+			entry = trim(entry);
+			if (entry.length() > 0 && (entry[0] == L'{' || entry[0] == L'<')) {
+				entry = toLower(entry);
+			}
+		}
 		needToInitialize = false;
 	}
 
@@ -168,6 +203,9 @@ vector<wstring> & ignoredProcessesW()
 
 	if (needToInitialize) {
 		result = loadAllKeysFromSectionOfIni(L"ignored processes");
+		for (auto &entry : result) {
+			entry = trim(toLower(entry));
+		}
 		needToInitialize = false;
 	}
 
@@ -346,6 +384,9 @@ void getDeviceInstanceId(LPCDIDEVICEINSTANCEW deviceInstance, EnumCallbackUserDa
 
 bool currentProcessIsIgnored()
 {
+	static int cachedResult = -1;
+	if (cachedResult >= 0) return cachedResult != 0;
+
 	WCHAR currentProcessPathCStr[MAX_PATH];
 	DWORD size = GetModuleFileName(NULL, currentProcessPathCStr, MAX_PATH);
 	wstring processFileName = currentProcessPathCStr;
@@ -358,69 +399,60 @@ bool currentProcessIsIgnored()
 	processFileName = trim(toLower(processFileName));
 	PrintLog(L"Current process name: %s", processFileName.c_str());
 
-	std::vector<wstring> ignored = ignoredProcessesW();
+	std::vector<wstring> &ignored = ignoredProcessesW();
 
 	PrintLog(L"Ignored list:");
 	for (auto it = ignored.begin(); it != ignored.end(); ++it) {
 		PrintLog(L" - %s", it->c_str());
 
-		if (trim(toLower(*it)) == processFileName) {
+		if (*it == processFileName) {
 			PrintLog(L"   found match!");
+			cachedResult = 1;
 			return true;
 		}
 	}
 
+	cachedResult = 0;
 	return false;
 }
 
 MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEA deviceInstance, EnumCallbackUserData* userData, string &deviceInstanceId, const string &entry)
 {
-	string trimmedEntry = trim(entry);
-	string deviceIdentifier;
-
 	if (entry.length() == 0) {
 		return kNoMatch;
 	}
 
 	if (entry[0] == '{') {
-		deviceIdentifier = GUIDToString(deviceInstance->guidInstance);
-		trimmedEntry = toLower(trimmedEntry);
-		return (deviceIdentifier == trimmedEntry) ? kGUIDMatch : kNoMatch;
+		string deviceIdentifier = GUIDToString(deviceInstance->guidInstance);
+		return (deviceIdentifier == entry) ? kGUIDMatch : kNoMatch;
 	} else if (entry[0] == '<') {
-		trimmedEntry = toLower(trimmedEntry);
 		getDeviceInstanceId(deviceInstance, userData, deviceInstanceId);
-		PrintLog("  a: %s", trimmedEntry.c_str());
+		PrintLog("  a: %s", entry.c_str());
 		PrintLog("  b: %s", deviceInstanceId.c_str());
-		return (deviceInstanceId == trimmedEntry) ? kDeviceInstanceIDMatch : kNoMatch;
+		return (deviceInstanceId == entry) ? kDeviceInstanceIDMatch : kNoMatch;
 	} else {
-		deviceIdentifier = trim(deviceInstance->tszProductName);
-		return (deviceIdentifier == trimmedEntry) ? kNameMatch : kNoMatch;
+		string deviceIdentifier = trim(deviceInstance->tszProductName);
+		return (deviceIdentifier == entry) ? kNameMatch : kNoMatch;
 	}
-
 }
 
 MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEW deviceInstance, EnumCallbackUserData* userData, wstring& deviceInstanceId, const wstring &entry)
 {
-	wstring trimmedEntry = trim(entry);
-	wstring deviceIdentifier;
-
 	if (entry.length() == 0) {
 		return kNoMatch;
 	}
 
 	if (entry[0] == L'{') {
-		deviceIdentifier = GUIDToWString(deviceInstance->guidInstance);
-		trimmedEntry = toLower(trimmedEntry);
-		return (deviceIdentifier == trimmedEntry) ? kGUIDMatch : kNoMatch;
+		wstring deviceIdentifier = GUIDToWString(deviceInstance->guidInstance);
+		return (deviceIdentifier == entry) ? kGUIDMatch : kNoMatch;
 	} else if (entry[0] == L'<') {
-		trimmedEntry = toLower(trimmedEntry);
 		getDeviceInstanceId(deviceInstance, userData, deviceInstanceId);
-		PrintLog(L"  a: %s", trimmedEntry.c_str());
+		PrintLog(L"  a: %s", entry.c_str());
 		PrintLog(L"  b: %s", deviceInstanceId.c_str());
-		return (deviceInstanceId == trimmedEntry) ? kDeviceInstanceIDMatch : kNoMatch;
+		return (deviceInstanceId == entry) ? kDeviceInstanceIDMatch : kNoMatch;
 	} else {
-		deviceIdentifier = trim(deviceInstance->tszProductName);
-		return (deviceIdentifier == trimmedEntry) ? kNameMatch : kNoMatch;
+		wstring deviceIdentifier = trim(deviceInstance->tszProductName);
+		return (deviceIdentifier == entry) ? kNameMatch : kNoMatch;
 	}
 }
 
@@ -449,6 +481,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 		for (unsigned int i = 0; i < visible.size(); ++i) {
 			if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, visible[i])) {
 				isVisible = true;
+				break;
 			}
 		}
 
@@ -515,6 +548,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 		for (unsigned int i = 0; i < visible.size(); ++i) {
 			if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, visible[i])) {
 				isVisible = true;
+				break;
 			}
 		}
 
