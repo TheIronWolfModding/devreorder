@@ -21,7 +21,7 @@ public:
 	{
 		std::wstring loadedModulePath, chainLoadFileName;
 		CSimpleIniW ini;
-		ini.SetAllowEmptyValues(false);
+		ini.SetAllowEmptyValues(true);
 		std::wstring inipath(L"devreorder.ini");
 		SI_Error err = ini.LoadFile(inipath.c_str());
 		LogSystem();
