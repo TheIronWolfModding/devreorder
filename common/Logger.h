@@ -87,6 +87,12 @@ public:
 		}
 	}
 
+	void Flush()
+	{
+		if (m_file != INVALID_HANDLE_VALUE)
+			FlushFileBuffers(m_file);
+	}
+
 	void Print(const wchar_t* format, va_list args)
 	{
 		bool to_file = m_file != INVALID_HANDLE_VALUE;
@@ -155,6 +161,11 @@ inline void LogSystem()
 	Logger::Get().System();
 }
 
+inline void LogFlush()
+{
+	Logger::Get().Flush();
+}
+
 inline void PrintLog(const char* format, ...)
 {
 	va_list args;
@@ -176,5 +187,6 @@ inline void PrintLog(const wchar_t * format, ...)
 #else
 #define LogFile(logname) (logname)
 #define LogSystem();
+#define LogFlush();
 #define PrintLog(format, ...) (format)
 #endif

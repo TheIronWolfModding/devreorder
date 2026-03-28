@@ -5,6 +5,7 @@
 #include <initguid.h>
 #include <Cfgmgr32.h>
 #include <Devpkey.h>
+#include <Shlwapi.h>
 
 #include "dinput8.h"
 #include "Common.h"
@@ -14,6 +15,58 @@
 #include "SimpleIni.h"
 
 using namespace std;
+
+static string g_enumLog;
+
+static void enumLog(const char *fmt, ...)
+{
+	char buf[512];
+	va_list args;
+	va_start(args, fmt);
+	_vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+	va_end(args);
+	g_enumLog += buf;
+	g_enumLog += "\r\n";
+}
+
+static void enumLogW(const wchar_t *fmt, ...)
+{
+	wchar_t wbuf[512];
+	va_list args;
+	va_start(args, fmt);
+	_vsnwprintf_s(wbuf, _countof(wbuf), _TRUNCATE, fmt, args);
+	va_end(args);
+	char buf[1024];
+	WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, buf, sizeof(buf), NULL, NULL);
+	g_enumLog += buf;
+	g_enumLog += "\r\n";
+}
+
+static string guidStr(const GUID &g)
+{
+	char buf[64];
+	sprintf_s(buf, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+		g.Data1, g.Data2, g.Data3,
+		g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+		g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+	return buf;
+}
+
+static void writeEnumLog()
+{
+	char path[MAX_PATH];
+	GetModuleFileNameA(NULL, path, MAX_PATH);
+	PathRemoveFileSpecA(path);
+	PathAppendA(path, "devreorder.log");
+	HANDLE hFile = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile != INVALID_HANDLE_VALUE) {
+		DWORD written;
+		WriteFile(hFile, g_enumLog.c_str(), (DWORD)g_enumLog.size(), &written, NULL);
+		FlushFileBuffers(hFile);
+		CloseHandle(hFile);
+	}
+	g_enumLog.clear();
+}
 
 enum MatchType {
 	kNoMatch,
@@ -496,7 +549,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 
 	for (unsigned int i = 0; i < hidden.size(); ++i) {
 		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i], hiddenGUIDs[i])) {
-			PrintLog("devreorder: product \"%s\" is hidden", deviceInstance->tszProductName);
+			enumLog("\"%s\" %s -> hidden", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -515,7 +568,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 		}
 
 		if (!isVisible) {
-			PrintLog("devreorder: product \"%s\" is not in visible section", deviceInstance->tszProductName);
+			enumLog("\"%s\" %s -> not in visible list", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -527,12 +580,12 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 
 		// Important that we prioritize a match via device instance ID or GUID over a match via name
 		if (match == kDeviceInstanceIDMatch) {
-			PrintLog("devreorder: product \"%s\" is sorted up by device instance ID", deviceInstance->tszProductName);
+			enumLog("\"%s\" %s -> sorted (device instance ID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
 		} else if (match == kGUIDMatch) {
-			PrintLog("devreorder: product \"%s\" is sorted up by GUID", deviceInstance->tszProductName);
+			enumLog("\"%s\" %s -> sorted (GUID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
@@ -542,12 +595,12 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 	}
 
 	if (nameMatchIndex != -1) {
-		PrintLog("devreorder: product \"%s\" is sorted up by name", deviceInstance->tszProductName);
+		enumLog("\"%s\" %s -> sorted (name)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 		enumData->sorted[nameMatchIndex].push_back(*deviceInstance);
 		return DIENUM_CONTINUE;
 	}
 
-	PrintLog("devreorder: product \"%s\" is not sorted differently", deviceInstance->tszProductName);
+	enumLog("\"%s\" %s -> unsorted", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 	enumData->nonsorted.push_back(*deviceInstance);
 	return DIENUM_CONTINUE;
 }
@@ -566,7 +619,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 
 	for (unsigned int i = 0; i < hidden.size(); ++i) {
 		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i], hiddenGUIDs[i])) {
-			PrintLog(L"devreorder: product \"%s\" is hidden", deviceInstance->tszProductName);
+			enumLogW(L"\"%s\" %S -> hidden", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -585,7 +638,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 		}
 
 		if (!isVisible) {
-			PrintLog(L"devreorder: product \"%s\" is not in visible section", deviceInstance->tszProductName);
+			enumLogW(L"\"%s\" %S -> not in visible list", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			return DIENUM_CONTINUE;
 		}
 	}
@@ -597,12 +650,12 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 
 		// Important that we prioritize a match via device instance ID or GUID over a match via name
 		if (match == kDeviceInstanceIDMatch) {
-			PrintLog(L"devreorder: product \"%s\" is sorted up by device instance ID", deviceInstance->tszProductName);
+			enumLogW(L"\"%s\" %S -> sorted (device instance ID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
 		} else if (match == kGUIDMatch) {
-			PrintLog(L"devreorder: product \"%s\" is sorted up by GUID", deviceInstance->tszProductName);
+			enumLogW(L"\"%s\" %S -> sorted (GUID)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 			enumData->sorted[i].push_back(*deviceInstance);
 			return DIENUM_CONTINUE;
 
@@ -612,12 +665,12 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 	}
 
 	if (nameMatchIndex != -1) {
-		PrintLog(L"devreorder: product \"%s\" is sorted up by name", deviceInstance->tszProductName);
+		enumLogW(L"\"%s\" %S -> sorted (name)", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 		enumData->sorted[nameMatchIndex].push_back(*deviceInstance);
 		return DIENUM_CONTINUE;
 	}
 
-	PrintLog(L"devreorder: product \"%s\" is not sorted differently", deviceInstance->tszProductName);
+	enumLogW(L"\"%s\" %S -> unsorted", deviceInstance->tszProductName, guidStr(deviceInstance->guidInstance).c_str());
 	enumData->nonsorted.push_back(*deviceInstance);
 	return DIENUM_CONTINUE;
 }
@@ -632,12 +685,17 @@ HRESULT STDMETHODCALLTYPE HookEnumDevicesA(LPDIRECTINPUT8A This, DWORD dwDevType
 	userData.enumData = (void *)&enumData;
 	userData.di = (void *)This;
 
-	PrintLog("devreorder: determining new sorting order for devices");
+	g_enumLog.clear();
+	enumLog("EnumDevices (ANSI)");
 	HRESULT result = TrueEnumDevicesA(This, dwDevType, enumCallbackA, (LPVOID)&userData, dwFlags);
 
 	if (result != DI_OK) {
-		return result;
+		enumLog("EnumDevices failed: 0x%08X", result);
 	}
+
+	writeEnumLog();
+
+	if (result != DI_OK) return result;
 
 	for(unsigned int i = 0; i < enumData.sorted.size(); ++i) {
 		for (unsigned int j = 0; j < enumData.sorted[i].size(); ++j) {
@@ -666,12 +724,17 @@ HRESULT STDMETHODCALLTYPE HookEnumDevicesW(LPDIRECTINPUT8W This, DWORD dwDevType
 	userData.enumData = (void *)&enumData;
 	userData.di = (void *)This;
 
-	PrintLog("devreorder: determining new sorting order for devices");
+	g_enumLog.clear();
+	enumLog("EnumDevices (Unicode)");
 	HRESULT result = TrueEnumDevicesW(This, dwDevType, enumCallbackW, (LPVOID)&userData, dwFlags);
 
 	if (result != DI_OK) {
-		return result;
+		enumLog("EnumDevices failed: 0x%08X", result);
 	}
+
+	writeEnumLog();
+
+	if (result != DI_OK) return result;
 
 	for (unsigned int i = 0; i < enumData.sorted.size(); ++i) {
 		for (unsigned int j = 0; j < enumData.sorted[i].size(); ++j) {
