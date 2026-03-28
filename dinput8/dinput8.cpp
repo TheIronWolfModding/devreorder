@@ -2,12 +2,9 @@
 #define CINTERFACE
 #include "stdafx.h"
 #include <dinput.h>
-#include <list>
 #include <initguid.h>
 #include <Cfgmgr32.h>
 #include <Devpkey.h>
-#include <locale>
-#include <codecvt>
 
 #include "dinput8.h"
 #include "Common.h"
@@ -24,6 +21,22 @@ enum MatchType {
 	kGUIDMatch,
 	kDeviceInstanceIDMatch,
 };
+
+// Parse a GUID string like "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}" into a GUID struct.
+// Returns GUID_NULL on failure.
+static GUID parseGUID(const string &str)
+{
+	GUID g;
+	StringToGUID(&g, str);
+	return g;
+}
+
+static GUID parseGUID(const wstring &str)
+{
+	GUID g;
+	StringToGUID(&g, str);
+	return g;
+}
 
 HRESULT(STDMETHODCALLTYPE *TrueEnumDevicesA) (LPDIRECTINPUT8A This, DWORD dwDevType, LPDIENUMDEVICESCALLBACKA lpCallback, LPVOID pvRef, DWORD dwFlags) = nullptr;
 HRESULT(STDMETHODCALLTYPE *TrueEnumDevicesW) (LPDIRECTINPUT8W This, DWORD dwDevType, LPDIENUMDEVICESCALLBACKW lpCallback, LPVOID pvRef, DWORD dwFlags) = nullptr;
@@ -57,7 +70,7 @@ static CSimpleIniW& getCachedIni()
 			err = ini.LoadFile(inipath.c_str());
 
 			if (err < 0) {
-				PrintLog("devreorder error: devreorder.ini file found");
+				PrintLog("devreorder error: devreorder.ini file not found");
 			} else {
 				PrintLog("devreorder: using system-wide devreorder.ini");
 			}
@@ -85,6 +98,38 @@ vector<wstring> loadAllKeysFromSectionOfIni(const wstring &section)
 	return result;
 }
 
+// Pre-parsed GUID cache: for entries starting with '{', store the parsed GUID.
+// GUID_NULL means the entry was not a GUID or failed to parse.
+static vector<GUID> & sortedControllersGUIDs()
+{
+	static vector<GUID> result;
+	return result;
+}
+
+static vector<GUID> & hiddenControllersGUIDs()
+{
+	static vector<GUID> result;
+	return result;
+}
+
+static vector<GUID> & visibleControllersGUIDs()
+{
+	static vector<GUID> result;
+	return result;
+}
+
+static void buildGUIDCache(const vector<wstring> &entries, vector<GUID> &guids)
+{
+	guids.resize(entries.size());
+	for (size_t i = 0; i < entries.size(); ++i) {
+		if (entries[i].length() > 0 && entries[i][0] == L'{') {
+			guids[i] = parseGUID(entries[i]);
+		} else {
+			guids[i] = GUID_NULL;
+		}
+	}
+}
+
 vector<wstring> & sortedControllersW()
 {
 	static vector<wstring> result;
@@ -99,6 +144,7 @@ vector<wstring> & sortedControllersW()
 				entry = toLower(entry);
 			}
 		}
+		buildGUIDCache(result, sortedControllersGUIDs());
 	}
 
 	return result;
@@ -135,6 +181,7 @@ vector<wstring> & hiddenControllersW()
 				entry = toLower(entry);
 			}
 		}
+		buildGUIDCache(result, hiddenControllersGUIDs());
 		needToInitialize = false;
 	}
 
@@ -172,6 +219,7 @@ vector<wstring> & visibleControllersW()
 				entry = toLower(entry);
 			}
 		}
+		buildGUIDCache(result, visibleControllersGUIDs());
 		needToInitialize = false;
 	}
 
@@ -232,8 +280,8 @@ vector<string> & ignoredProcessesA()
 
 template <class T>
 struct DeviceEnumData {
-	list<T> nonsorted;
-	vector<list<T> > sorted;
+	vector<T> nonsorted;
+	vector<vector<T> > sorted;
 };
 
 string trim(const string &str)
@@ -274,24 +322,6 @@ wstring toLower(const wstring &str)
 	wstring result = str;
 	transform(result.begin(), result.end(), result.begin(), ::tolower);
 	return result;
-}
-
-string GUIDToString(const GUID &guid)
-{
-	CHAR result[40];
-	sprintf_s(result, 40, "{%08lx-%04hx-%04hx-%02hhx%02hhx-%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx}",
-		      guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1], guid.Data4[2],
-		      guid.Data4[3], guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-	return string(result);
-}
-
-wstring GUIDToWString(const GUID &guid)
-{
-	WCHAR result[40];
-	swprintf_s(result, 40, L"{%08lx-%04hx-%04hx-%02hhx%02hhx-%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx}",
-		       guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1], guid.Data4[2],
-		       guid.Data4[3], guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-	return wstring(result);
 }
 
 
@@ -347,9 +377,7 @@ void getDeviceInstanceId(LPCDIDEVICEINSTANCEA deviceInstance, EnumCallbackUserDa
 		deviceIdWide = L"!";
 	}
 
-	using convertType = std::codecvt_utf8<wchar_t>;
-	std::wstring_convert<convertType, wchar_t> converter;
-	deviceInstanceId = converter.to_bytes(deviceIdWide);
+	deviceInstanceId = UTF16ToUTF8(deviceIdWide);
 
 	IDirectInputDevice_Release(device);
 }
@@ -416,15 +444,14 @@ bool currentProcessIsIgnored()
 	return false;
 }
 
-MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEA deviceInstance, EnumCallbackUserData* userData, string &deviceInstanceId, const string &entry)
+MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEA deviceInstance, EnumCallbackUserData* userData, string &deviceInstanceId, const string &entry, const GUID &entryGUID)
 {
 	if (entry.length() == 0) {
 		return kNoMatch;
 	}
 
 	if (entry[0] == '{') {
-		string deviceIdentifier = GUIDToString(deviceInstance->guidInstance);
-		return (deviceIdentifier == entry) ? kGUIDMatch : kNoMatch;
+		return IsEqualGUID(deviceInstance->guidInstance, entryGUID) ? kGUIDMatch : kNoMatch;
 	} else if (entry[0] == '<') {
 		getDeviceInstanceId(deviceInstance, userData, deviceInstanceId);
 		PrintLog("  a: %s", entry.c_str());
@@ -436,15 +463,14 @@ MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEA deviceInstance, EnumCallbackUs
 	}
 }
 
-MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEW deviceInstance, EnumCallbackUserData* userData, wstring& deviceInstanceId, const wstring &entry)
+MatchType deviceMatchesEntry(LPCDIDEVICEINSTANCEW deviceInstance, EnumCallbackUserData* userData, wstring& deviceInstanceId, const wstring &entry, const GUID &entryGUID)
 {
 	if (entry.length() == 0) {
 		return kNoMatch;
 	}
 
 	if (entry[0] == L'{') {
-		wstring deviceIdentifier = GUIDToWString(deviceInstance->guidInstance);
-		return (deviceIdentifier == entry) ? kGUIDMatch : kNoMatch;
+		return IsEqualGUID(deviceInstance->guidInstance, entryGUID) ? kGUIDMatch : kNoMatch;
 	} else if (entry[0] == L'<') {
 		getDeviceInstanceId(deviceInstance, userData, deviceInstanceId);
 		PrintLog(L"  a: %s", entry.c_str());
@@ -463,10 +489,13 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 	vector<string> &order = sortedControllersA();
 	vector<string> &hidden = hiddenControllersA();
 	vector<string> &visible = visibleControllersA();
+	vector<GUID> &orderGUIDs = sortedControllersGUIDs();
+	vector<GUID> &hiddenGUIDs = hiddenControllersGUIDs();
+	vector<GUID> &visibleGUIDs = visibleControllersGUIDs();
 	string deviceInstanceId;
 
 	for (unsigned int i = 0; i < hidden.size(); ++i) {
-		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i])) {
+		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i], hiddenGUIDs[i])) {
 			PrintLog("devreorder: product \"%s\" is hidden", deviceInstance->tszProductName);
 			return DIENUM_CONTINUE;
 		}
@@ -479,7 +508,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 		bool isVisible = false;
 
 		for (unsigned int i = 0; i < visible.size(); ++i) {
-			if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, visible[i])) {
+			if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, visible[i], visibleGUIDs[i])) {
 				isVisible = true;
 				break;
 			}
@@ -494,7 +523,7 @@ BOOL CALLBACK enumCallbackA(LPCDIDEVICEINSTANCEA deviceInstance, LPVOID userData
 	int nameMatchIndex = -1;
 
 	for (unsigned int i = 0; i < order.size(); ++i) {
-		MatchType match = deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, order[i]);
+		MatchType match = deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, order[i], orderGUIDs[i]);
 
 		// Important that we prioritize a match via device instance ID or GUID over a match via name
 		if (match == kDeviceInstanceIDMatch) {
@@ -530,10 +559,13 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 	vector<wstring> &order = sortedControllersW();
 	vector<wstring> &hidden = hiddenControllersW();
 	vector<wstring> &visible = visibleControllersW();
+	vector<GUID> &orderGUIDs = sortedControllersGUIDs();
+	vector<GUID> &hiddenGUIDs = hiddenControllersGUIDs();
+	vector<GUID> &visibleGUIDs = visibleControllersGUIDs();
 	wstring deviceInstanceId;
 
 	for (unsigned int i = 0; i < hidden.size(); ++i) {
-		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i])) {
+		if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, hidden[i], hiddenGUIDs[i])) {
 			PrintLog(L"devreorder: product \"%s\" is hidden", deviceInstance->tszProductName);
 			return DIENUM_CONTINUE;
 		}
@@ -546,7 +578,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 		bool isVisible = false;
 
 		for (unsigned int i = 0; i < visible.size(); ++i) {
-			if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, visible[i])) {
+			if (deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, visible[i], visibleGUIDs[i])) {
 				isVisible = true;
 				break;
 			}
@@ -561,7 +593,7 @@ BOOL CALLBACK enumCallbackW(LPCDIDEVICEINSTANCEW deviceInstance, LPVOID userData
 	int nameMatchIndex = -1;
 
 	for (unsigned int i = 0; i < order.size(); ++i) {
-		MatchType match = deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, order[i]);
+		MatchType match = deviceMatchesEntry(deviceInstance, userData, deviceInstanceId, order[i], orderGUIDs[i]);
 
 		// Important that we prioritize a match via device instance ID or GUID over a match via name
 		if (match == kDeviceInstanceIDMatch) {
@@ -608,15 +640,15 @@ HRESULT STDMETHODCALLTYPE HookEnumDevicesA(LPDIRECTINPUT8A This, DWORD dwDevType
 	}
 
 	for(unsigned int i = 0; i < enumData.sorted.size(); ++i) {
-		for (list<DIDEVICEINSTANCEA>::iterator it = enumData.sorted[i].begin(); it != enumData.sorted[i].end(); ++it) {
-			if (lpCallback(&(*it), pvRef) != DIENUM_CONTINUE) {
+		for (unsigned int j = 0; j < enumData.sorted[i].size(); ++j) {
+			if (lpCallback(&enumData.sorted[i][j], pvRef) != DIENUM_CONTINUE) {
 				return result;
 			}
 		}
 	}
 
-	for (list<DIDEVICEINSTANCEA>::iterator it = enumData.nonsorted.begin(); it != enumData.nonsorted.end(); ++it) {
-		if (lpCallback(&(*it), pvRef) != DIENUM_CONTINUE) {
+	for (unsigned int i = 0; i < enumData.nonsorted.size(); ++i) {
+		if (lpCallback(&enumData.nonsorted[i], pvRef) != DIENUM_CONTINUE) {
 			return result;
 		}
 	}
@@ -642,15 +674,15 @@ HRESULT STDMETHODCALLTYPE HookEnumDevicesW(LPDIRECTINPUT8W This, DWORD dwDevType
 	}
 
 	for (unsigned int i = 0; i < enumData.sorted.size(); ++i) {
-		for (list<DIDEVICEINSTANCEW>::iterator it = enumData.sorted[i].begin(); it != enumData.sorted[i].end(); ++it) {
-			if (lpCallback(&(*it), pvRef) != DIENUM_CONTINUE) {
+		for (unsigned int j = 0; j < enumData.sorted[i].size(); ++j) {
+			if (lpCallback(&enumData.sorted[i][j], pvRef) != DIENUM_CONTINUE) {
 				return result;
 			}
 		}
 	}
 
-	for (list<DIDEVICEINSTANCEW>::iterator it = enumData.nonsorted.begin(); it != enumData.nonsorted.end(); ++it) {
-		if (lpCallback(&(*it), pvRef) != DIENUM_CONTINUE) {
+	for (unsigned int i = 0; i < enumData.nonsorted.size(); ++i) {
+		if (lpCallback(&enumData.nonsorted[i], pvRef) != DIENUM_CONTINUE) {
 			return result;
 		}
 	}
@@ -707,13 +739,6 @@ extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE hinst, DWORD dwVersion, R
 
 	if (hr != DI_OK) return hr;
 
-	PrintLog("devreorder: in CreateHooks");
-
-	if (currentProcessIsIgnored()) {
-		PrintLog("... current process is ignored, not hooking into DirectInput");
-		return hr;
-	}
-
 	CreateHooks(riidltf, ppvOut);
 
 	return hr;
@@ -742,16 +767,24 @@ extern "C" HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID
 
 	*ppv = cf;
 
-	IDirectInput8 *realDI;
-	hr = cf->lpVtbl->CreateInstance(cf, NULL, IID_IDirectInput8, (void**)&realDI);
+	// Try Unicode first (most modern games), then fall back to ANSI
+	IDirectInput8W *realDIW = nullptr;
+	hr = cf->lpVtbl->CreateInstance(cf, NULL, IID_IDirectInput8W, (void**)&realDIW);
 
-	if (hr != DI_OK) {
-		return hr;
+	if (hr == DI_OK && realDIW) {
+		CreateHooks(IID_IDirectInput8W, (LPVOID *)&realDIW);
+		realDIW->lpVtbl->Release(realDIW);
+	} else {
+		IDirectInput8A *realDIA = nullptr;
+		hr = cf->lpVtbl->CreateInstance(cf, NULL, IID_IDirectInput8A, (void**)&realDIA);
+
+		if (hr == DI_OK && realDIA) {
+			CreateHooks(IID_IDirectInput8A, (LPVOID *)&realDIA);
+			realDIA->lpVtbl->Release(realDIA);
+		}
 	}
 
-	CreateHooks(IID_IDirectInput8, (LPVOID *)&realDI);
-
-	return hr;
+	return S_OK;
 }
 
 extern "C" HRESULT WINAPI DllRegisterServer(void)

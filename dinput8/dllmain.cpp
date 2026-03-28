@@ -27,6 +27,7 @@
 
 void _cdecl ExitInstance()
 {
+	MH_Uninitialize();
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule,

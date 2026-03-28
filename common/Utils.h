@@ -33,3 +33,5 @@ bool ModuleFileName(std::string* out, HMODULE hModule = NULL);
 bool ModuleFileName(std::wstring* out, HMODULE hModule = NULL);
 std::wstring thisModuleDirectory();
 std::wstring getSystemDirectoryString();
+void StringToGUID(GUID* id, const std::string& szBuf);
+void StringToGUID(GUID* id, const std::wstring& szBuf);
